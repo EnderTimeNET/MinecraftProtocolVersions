@@ -1,9 +1,8 @@
 import argparse
-from audioop import reverse
+import os
 
-from data import load_version_file
-from download import *
-from src.data import extract_names_from_json, save_version_file
+from data import get_known_versions, load_version_file, save_version_file
+from download import fetch_version_info, fetch_versions
 
 parser = argparse.ArgumentParser(description='Minecraft Server Protocol Version Fetcher')
 parser.add_argument(
@@ -13,31 +12,41 @@ parser.add_argument(
 )
 
 
+def append_to_github_file(env_var: str, line: str):
+    """
+    Appends a line to a GitHub Actions file like GITHUB_OUTPUT. Does nothing outside of GitHub Actions.
+    """
+    file_path = os.environ.get(env_var)
+    if not file_path:
+        return
+
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(f"{line}\n")
+
+
 def run(version_type: str):
     version_data = load_version_file(version_type)
-    versions = fetch_minecraft_version_by_version(version_type)
+    known_versions = get_known_versions(version_data)
+    versions = fetch_versions(version_type)
+    missing_versions = {version: url for version, url in versions.items() if version not in known_versions}
 
-    print(__file__)
+    print(f"Found {len(versions)} minecraft versions.")
+    print(f"Missing minecraft versions: {list(missing_versions)}")
 
-    version_names = extract_names_from_json(version_data)
-    missing_versions = {version:url for version, url in versions.items() if version not in version_names}
-    missing_version_names = list(missing_versions.keys())
+    if not missing_versions:
+        return
 
-    print("Found {} minecraft versions.".format(len(versions)))
-    print("Missing minecraft versions: {}".format(missing_version_names))
+    new_version_data = []
+    for version, url in missing_versions.items():
+        print(f"Downloading minecraft version {version}...")
+        new_version_data.append(fetch_version_info(version, url))
 
-    if len(missing_versions) == 0:
-        exit(0)
-
-    for (version, url) in reversed(missing_versions.items()):
-        print("Downloading minecraft version {}...".format(version))
-        version_data.insert(0, download_client_version(version, url))
+    save_version_file(version_type, new_version_data + version_data)
 
     added_versions = ",".join(missing_versions)
-    os.system(f"echo Added Versions: {added_versions} >> $GITHUB_STEP_SUMMARY")
-    os.system(f"echo ::set-output name=ADDED_VERSIONS::{added_versions}")
+    append_to_github_file("GITHUB_OUTPUT", f"added_versions={added_versions}")
+    append_to_github_file("GITHUB_STEP_SUMMARY", f"Added {version_type} versions: {added_versions}")
 
-    save_version_file(version_type, version_data)
 
 if __name__ == "__main__":
     args = parser.parse_args()

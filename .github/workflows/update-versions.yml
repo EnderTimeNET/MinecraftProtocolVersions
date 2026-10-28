@@ -1,0 +1,47 @@
+name: Update Versions
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-versions
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install packages
+        run: pip install -r requirements.txt
+      - name: Update release versions
+        id: release
+        run: python src/app.py release
+      - name: Update snapshot versions
+        id: snapshot
+        if: ${{ !cancelled() }}
+        run: python src/app.py snapshot
+      - name: Commit changes
+        if: ${{ !cancelled() && (steps.release.outputs.added_versions || steps.snapshot.outputs.added_versions) }}
+        env:
+          ADDED_RELEASES: ${{ steps.release.outputs.added_versions }}
+          ADDED_SNAPSHOTS: ${{ steps.snapshot.outputs.added_versions }}
+        run: |
+          git config user.name automation
+          git config user.email action@github.com
+          if [ -n "$ADDED_RELEASES" ]; then
+            git commit -m "Update release.json: Added Versions: $ADDED_RELEASES" -- release.json
+          fi
+          if [ -n "$ADDED_SNAPSHOTS" ]; then
+            git commit -m "Update snapshot.json: Added Versions: $ADDED_SNAPSHOTS" -- snapshot.json
+          fi
+          git push
